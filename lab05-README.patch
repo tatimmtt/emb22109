@@ -1,0 +1,338 @@
+diff --git a/labs/lab05/README.md b/labs/lab05/README.md
+new file mode 100644
+index 0000000..e846dbb
+--- /dev/null
++++ b/labs/lab05/README.md
+@@ -0,0 +1,332 @@
++# Lab 05
++<!--Desenvolvimento de aplicações-->
++
++Objetivos:
++  - Compilar e executar sua própria aplicação usando a toolchain gerada pelo Buildroot
++  - Depurar remotamente a aplicação com `gdb` e `gdbserver`
++  - Criar um pacote para a aplicação em uma árvore `BR2_EXTERNAL`
++
++## Preparação
++
++Este laboratório parte do sistema construído ao final do Lab 04 (após o `make clean all`). Verifique se:
++
++  - o BeagleBone Black inicializa com esse sistema e você consegue acessá-lo com `ssh root@192.168.0.1`;
++  - o pacote `libconfig` continua habilitado na configuração do Buildroot (ele foi habilitado no Lab 04 e será usado pela nossa aplicação).
++
++Ao longo do laboratório usaremos `scp` para copiar arquivos para o alvo. As versões recentes do OpenSSH (9.0 em diante) usam o protocolo SFTP por padrão no `scp`, mas o servidor *dropbear* do nosso alvo não oferece SFTP. Por isso, use sempre a opção `-O`, que força o protocolo antigo:
++
++```
++scp -O <arquivo> root@192.168.0.1:<destino>
++```
++
++> Nota: sempre que você regravar o sistema de arquivos raiz no cartão SD, o *dropbear* gera uma nova chave de *host* e o `ssh` do seu PC passa a recusar a conexão com a mensagem `REMOTE HOST IDENTIFICATION HAS CHANGED`. Nesse caso, remova a chave antiga com `ssh-keygen -R 192.168.0.1` e conecte novamente.
++
++## Compilando e executando sua própria aplicação
++
++Vamos criar uma pequena aplicação, que usaremos como exemplo ao longo deste laboratório. Crie o diretório `/emb22109/myapp` e, dentro dele, um único arquivo C chamado `myapp.c` com o seguinte conteúdo:
++
++```c
++#include <stdio.h>
++
++int main(void) {
++        printf("Hello World\n");
++        return 0;
++}
++```
++
++Para compilar essa aplicação, usaremos o compilador cruzado gerado pelo Buildroot. Para facilitar, adicione o diretório `host` do Buildroot ao seu `PATH`:
++
++```
++export PATH=/emb22109/buildroot/output/host/bin:$PATH
++```
++
++> Nota: o `export` vale apenas para o terminal atual. Repita-o em cada novo terminal que abrir neste laboratório.
++
++Agora você pode compilar sua aplicação facilmente:
++
++```
++cd /emb22109/myapp
++arm-none-linux-gnueabihf-gcc -o myapp myapp.c
++```
++
++Use o comando `file myapp` para confirmar que o binário gerado é um executável ARM. Em seguida, copie-o para o alvo:
++
++```
++scp -O myapp root@192.168.0.1:
++```
++
++e execute a aplicação `myapp` no alvo (o arquivo foi copiado para `/root`, o diretório *home* do usuário `root`).
++
++### Usando uma biblioteca
++
++Agora, vamos estender um pouco a aplicação para usar uma biblioteca: a `libconfig`, que já utilizamos no laboratório anterior. Substitua o código-fonte da aplicação pela versão fornecida no diretório deste laboratório:
++
++```
++cp /emb22109/labs/lab05/files/myapp.c /emb22109/myapp/myapp.c
++```
++
++Se você tentar compilar essa aplicação apenas com:
++
++```
++arm-none-linux-gnueabihf-gcc -o myapp myapp.c
++```
++
++a compilação falhará com erros como `undefined reference to 'config_init'`, porque o programa não foi ligado à `libconfig`. Você pode resolver isso manualmente:
++
++```
++arm-none-linux-gnueabihf-gcc -o myapp myapp.c -lconfig
++```
++
++Isso funciona porque o arquivo `libconfig.so` está em `output/staging/usr/lib` e o compilador gerado pelo Buildroot está configurado para procurar bibliotecas e cabeçalhos automaticamente em `output/staging`, que é o seu *sysroot*. Você pode confirmar isso comparando a saída de `arm-none-linux-gnueabihf-gcc -print-sysroot` com a de `readlink -f /emb22109/buildroot/output/staging`.
++
++No entanto, existe uma solução melhor: usar o `pkg-config`. O Buildroot instalou uma versão especial do `pkg-config` em `output/host/bin`, que responde sobre as bibliotecas disponíveis para o **alvo** (e não para o seu PC). Primeiro, confirme com `which pkg-config` que é essa versão que está sendo usada[^pkgconf]. Em seguida, execute:
++
++[^pkgconf]: O `pkg-config` do Buildroot é instalado pelo pacote `host-pkgconf`, que foi adicionado às dependências do *bar* no Lab 04. Se ele não estiver em `output/host/bin`, execute `make host-pkgconf` no diretório do Buildroot.
++
++```
++pkg-config --list-all
++```
++
++e verifique se a `libconfig` aparece na lista. Você pode consultar as opções de compilação e de ligação da `libconfig`:
++
++```
++pkg-config --cflags --libs libconfig
++```
++
++e usá-las para compilar sua aplicação:
++
++```
++arm-none-linux-gnueabihf-gcc -o myapp myapp.c $(pkg-config --cflags --libs libconfig)
++```
++
++No caso da `libconfig`, isso não simplifica muito, pois as opções são simples, mas para outras bibliotecas elas podem ser bem mais complicadas.
++
++Copie a nova versão do `myapp` para o alvo e execute-a. Ela deve reclamar que não consegue abrir o arquivo de configuração. Crie no alvo, no mesmo diretório em que você executa a aplicação, um arquivo `myapp.cfg` (o conteúdo pode ser, por exemplo, `verbose = "yes";`) e execute a aplicação novamente.
++
++## Depurando a aplicação remotamente
++
++Nossa aplicação é simples e funciona, mas e se fosse preciso depurá-la? Vamos configurar a depuração remota: o `gdbserver` executa no alvo e controla o processo, enquanto o `gdb` cruzado executa no PC, com acesso ao código-fonte e aos símbolos de depuração.
++
++### Preparando o sistema
++
++A toolchain da ARM que estamos usando já vem com um `gdbserver` pré-compilado, então vamos simplesmente utilizá-lo. No `menuconfig`, no menu `Toolchain`, habilite a opção `Copy gdb server to the Target` (`BR2_TOOLCHAIN_EXTERNAL_GDB_SERVER_COPY`).
++
++Para uma depuração adequada, precisamos também de símbolos de depuração. Precisamos de duas coisas:
++
++  1. Recompilar nossa aplicação com a opção `-g`.
++  2. Recompilar o sistema do Buildroot com símbolos de depuração, para que as bibliotecas compartilhadas tenham esses símbolos. Como não queremos reconstruir todo o sistema agora, vamos recompilar apenas a biblioteca que nos interessa: a `libconfig`.
++
++Ainda no `menuconfig`, no menu `Build options`, habilite a opção `build packages with debugging symbols` (`BR2_ENABLE_DEBUG`). Mantenha habilitada a opção `strip target binaries`: os binários em `output/target` continuarão sem símbolos (e pequenos), enquanto as cópias em `output/staging` mantêm os símbolos de depuração. É o `gdb`, no PC, que vai ler esses símbolos.
++
++Saia do `menuconfig`. O Buildroot não refaz automaticamente os pacotes já construídos quando a configuração muda, então precisamos forçar a reinstalação da toolchain (para copiar o `gdbserver`) e a reconstrução da `libconfig`:
++
++```
++make toolchain-external-arm-arm-reinstall
++make libconfig-dirclean all
++```
++
++Verifique que o arquivo `output/target/usr/bin/gdbserver` foi criado. Compare também as duas cópias da `libconfig`:
++
++```
++file -L output/staging/usr/lib/libconfig.so output/target/usr/lib/libconfig.so
++```
++
++A cópia em `staging` deve indicar `with debug_info, not stripped`, enquanto a cópia em `target` deve indicar `stripped`.
++
++Atualize o sistema de arquivos raiz no cartão SD (com o `rootfs_update.sh clean`, como nos laboratórios anteriores) e reinicie o alvo. Como alternativa, você poderia copiar apenas o `output/target/usr/bin/gdbserver` para o diretório `/usr/bin/` do alvo usando `scp -O`, mas regravar o sistema garante que a `libconfig` no alvo corresponde exatamente à que está em `output/staging`.
++
++> Nota: ao regravar o sistema de arquivos raiz, o conteúdo de `/root` no alvo é apagado. Você precisará copiar o `myapp` e recriar o `myapp.cfg`.
++
++### Sessão de depuração
++
++Recompile o `myapp` com a opção `-g` e copie-o novamente para o alvo:
++
++```
++arm-none-linux-gnueabihf-gcc -g -o myapp myapp.c $(pkg-config --cflags --libs libconfig)
++scp -O myapp root@192.168.0.1:
++```
++
++Agora, no alvo, a partir do diretório `/root`, inicie o `gdbserver` no modo multiprocesso, aguardando conexões na porta TCP 2345:
++
++```
++gdbserver --multi :2345
++```
++
++De volta ao PC, no diretório `/emb22109/myapp`, execute o `gdb` cruzado com a aplicação `myapp` como argumento:
++
++```
++arm-none-linux-gnueabihf-gdb myapp
++```
++
++> Nota: o `gdb` da toolchain é um binário pré-compilado pela ARM. Caso ele não inicie no container por falta de alguma biblioteca do sistema, avise o professor.
++
++Precisamos informar ao `gdb` onde encontrar as bibliotecas (com seus símbolos de depuração):
++
++```
++(gdb) set sysroot /emb22109/buildroot/output/staging
++```
++
++Em seguida, conecte-se ao alvo:
++
++```
++(gdb) target extended-remote 192.168.0.1:2345
++```
++
++Defina qual programa queremos executar no alvo:
++
++```
++(gdb) set remote exec-file /root/myapp
++```
++
++Coloque um *breakpoint* na função `main` e inicie o programa:
++
++```
++(gdb) break main
++(gdb) run
++```
++
++O programa para na primeira linha da função `main`, que é a chamada para `config_init`, implementada pela biblioteca `libconfig`. Se você executar a instrução `step` do `gdb`, ele entrará na função, permitindo que você acompanhe o que acontece. Após executar `step` uma vez, use `backtrace` para ver que você está na função `config_init`, chamada por `main`:
++
++```
++(gdb) backtrace
++#0  config_init (config=0xbefffc3c) at libconfig.c:725
++#1  0x000106f0 in main () at myapp.c:11
++```
++
++Os endereços e o número da linha em `libconfig.c` podem ser diferentes no seu sistema. Explore também outros comandos, como `next`, `finish`, `list`, `print` e `info sharedlibrary`, e use `continue` para deixar o programa terminar. Se `myapp.cfg` existir em `/root`, a mensagem `Config file successfully opened` aparecerá no terminal do alvo.
++
++Para encerrar o `gdbserver` no alvo, use o comando `monitor exit` do `gdb`. Depois, saia do `gdb` com `quit`.
++
++Para pensar: repita a sessão **sem** o comando `set sysroot`. O que acontece quando você executa `step` na chamada a `config_init`? Por quê?
++
++> Dica: para não digitar os mesmos comandos a cada sessão, coloque-os em um arquivo (por exemplo, `debug.gdb`) e execute `arm-none-linux-gnueabihf-gdb -x debug.gdb myapp`.
++
++## Criando um pacote para a aplicação
++
++Compilar manualmente a sua própria aplicação não é o ideal: obviamente queremos criar um pacote do Buildroot para ela. Um mecanismo útil para empacotar suas próprias aplicações é o método de obtenção (*site method*) `local`, que informa ao Buildroot que o código-fonte da aplicação está disponível localmente, em um diretório da sua máquina.
++
++### Criando uma árvore `BR2_EXTERNAL`
++
++Até aqui, criamos os pacotes (*nInvaders*, `libfoo`, *bar*) diretamente no diretório `package/` do Buildroot. Para os componentes específicos de um projeto, porém, a prática recomendada é mantê-los **fora** da árvore do Buildroot, em uma árvore `BR2_EXTERNAL`. Assim, o Buildroot pode ser atualizado sem misturar suas modificações com o código original.
++
++> Atenção: o repositório da disciplina já contém um diretório `external/` (com o nome `EMB22109`), mas ele traz o seu próprio pacote `ninvaders`. Como você já criou o `package/ninvaders` no Lab 03, usá-lo faria o Buildroot parar com o erro `Package 'ninvaders' defined a second time`. Por isso, crie uma nova árvore, somente para este laboratório.
++
++Crie o diretório `/emb22109/lab05-external`. Uma árvore `BR2_EXTERNAL` precisa de, no mínimo, três arquivos na sua raiz.
++
++O arquivo `external.desc` dá um nome à árvore:
++
++```
++name: LAB05
++desc: Pacotes do Lab 05
++```
++
++A partir do nome, o Buildroot define a variável `BR2_EXTERNAL_LAB05_PATH`, com o caminho absoluto da árvore. Use essa variável sempre que precisar se referir a arquivos da árvore externa.
++
++O arquivo `Config.in` é incluído no `menuconfig`, e deve carregar o `Config.in` de cada pacote da árvore:
++
++```
++source "$BR2_EXTERNAL_LAB05_PATH/package/myapp/Config.in"
++```
++
++O arquivo `external.mk` é incluído pelo `Makefile` do Buildroot, e deve incluir o `.mk` de cada pacote da árvore:
++
++```
++include $(sort $(wildcard $(BR2_EXTERNAL_LAB05_PATH)/package/*/*.mk))
++```
++
++### O pacote `myapp`
++
++Crie agora o pacote `myapp` no diretório `package/myapp` da sua árvore externa, com os arquivos `Config.in` e `myapp.mk`. Algumas dicas:
++
++  - No `Config.in`, lembre-se de que a `libconfig` é uma dependência obrigatória da aplicação (Labs 03 e 04: dependências são declaradas em dois lugares).
++  - No `myapp.mk`, use o método `local` para que o pacote use diretamente o código-fonte em `/emb22109/myapp`. Lembre-se de que você pode usar `$(TOPDIR)` para se referir ao diretório raiz das fontes do Buildroot (`/emb22109/buildroot`): prefira um caminho relativo a ele em vez de um caminho absoluto.
++  - Por enquanto, chame o compilador diretamente nos comandos de compilação, usando as variáveis `$(TARGET_CC)`, `$(TARGET_CFLAGS)` e `$(TARGET_LDFLAGS)`. É claro que, se sua aplicação se tornar mais complexa, você deve passar a usar um sistema de compilação adequado (Makefile, autotools, CMake etc.).
++  - Não se esqueça dos comandos de instalação: o binário deve ser instalado em `/usr/bin` do alvo.
++  - Pacotes com o método `local` não baixam nada, portanto não precisam de arquivo `.hash`.
++
++Você pode verificar o estilo dos arquivos com o `check-package`, informando que eles pertencem a uma árvore externa:
++
++```
++./utils/check-package -b /emb22109/lab05-external/package/myapp/*
++```
++
++Para que o Buildroot passe a usar a árvore externa, passe a variável `BR2_EXTERNAL` uma vez, no diretório do Buildroot:
++
++```
++make BR2_EXTERNAL=/emb22109/lab05-external menuconfig
++```
++
++Um novo menu, `External options`, aparece no final do menu principal, com a opção do seu pacote. O Buildroot memoriza o caminho da árvore externa (no arquivo `output/.br2-external.mk`), então não é preciso passar `BR2_EXTERNAL` nas próximas chamadas do `make`.
++
++Habilite o pacote `myapp` e execute `make`. Quando o pacote for construído, você deverá ver, como primeira etapa, a sincronização (via `rsync`) do código-fonte do `myapp` a partir do diretório `/emb22109/myapp`:
++
++```
++>>> myapp  Syncing from source dir /emb22109/buildroot/../myapp
++```
++
++A compilação deve prosseguir até o final. Verifique se o arquivo `output/target/usr/bin/myapp` foi gerado.
++
++### O ciclo de desenvolvimento
++
++Agora, faça uma alteração simples, mas visível, no código-fonte em `/emb22109/myapp/myapp.c` (por exemplo, altere a mensagem impressa).
++
++Execute `make` e observe que nada acontece com o `myapp`: o Buildroot não detecta alterações no código-fonte dos pacotes. Reinicie então a compilação do `myapp` usando `make myapp-rebuild`: você verá que o Buildroot sincroniza novamente o código-fonte antes de recompilá-lo. Em seguida, copie o novo binário para o alvo:
++
++```
++scp -O output/target/usr/bin/myapp root@192.168.0.1:/usr/bin
++```
++
++e execute `myapp` novamente no alvo (no diretório onde está o `myapp.cfg`).
++
++Como você pode ver, agora é possível desenvolver suas aplicações e bibliotecas usando seu sistema de controle de versão habitual, e contar com o Buildroot para fazer todas as etapas de configuração, compilação e instalação.
++
++### Salvando o trabalho
++
++Salve a configuração do Buildroot com `make savedefconfig` e confira, no arquivo `configs/emb22109_defconfig`, as novas opções habilitadas neste laboratório.
++
++Observe que o caminho da árvore externa **não** fica registrado no *defconfig*. Para recriar a configuração a partir dele, é preciso informar novamente a árvore externa:
++
++```
++make BR2_EXTERNAL=/emb22109/lab05-external emb22109_defconfig
++```
++
++Por fim, a árvore `/emb22109/lab05-external` e o diretório `/emb22109/myapp` são código do **seu** projeto: é uma boa ideia versioná-los com o Git.
++
++## Para ir além (opcional)
++
++  - Crie um `Makefile` simples em `/emb22109/myapp` e altere o `myapp.mk` para usá-lo nos comandos de compilação, da mesma forma que fizemos com o *nInvaders* no Lab 03 (`$(TARGET_MAKE_ENV) $(MAKE) $(TARGET_CONFIGURE_OPTS) -C $(@D)`).
++  - Faça o pacote instalar também um arquivo `myapp.cfg` padrão no alvo (por exemplo, em `/etc`) e ajuste a aplicação para lê-lo de lá.
++
++Parabéns, você concluiu os laboratórios de Buildroot da disciplina!
++
++<!-- Markdown Reference
++
++## header 1
++
++### header 2
++
++* italic *
++
++**bold**
++
++*** bold & italic ***
++
++~~ strike-through ~~
++
++> quote
++
++` monospace-code `
++
++```
++code block
++```
++named footnote[^footnote01]
++[^footnote01]: See https://elinux.org/images/e/ef/USB_Gadget_Configfs_API_0.pdf for more details
++
++Repo link to file
++[/labs/lab02/files/S30usbgadget](./files/S30usbgadget).
++
++Image centered and scaled.
++<p align="center"><img src="imgs/bbb-nunchuk-connection.jpg" alt="Nunchuk Connection" align="center" width="50%"/>
++
++-->
