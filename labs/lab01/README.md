@@ -43,8 +43,8 @@ Agora, para entrar no container, basta executar o comando:
 toolbox enter dev
 ```
 
-Todo o desenvolvimento dos laboratórios serão executados dentro do ambiente do
-container emb22109, sendo que dentro do mesmo, há uma pasta no caminho
+Todo o desenvolvimento dos laboratórios será executado dentro do ambiente do
+container ```dev```, sendo que dentro do mesmo, há uma pasta no caminho
 ```/emb22109/```, que está mapeado no diretório ```/var/data/aluno/emb22109```
 do seu computador.
 
@@ -89,8 +89,8 @@ realize as seguintes configurações:
 
 #### Build options
 
-Por hora não necessitamos modificar nenhum configuração do menu Build Options.
-De qualquer forma, aproveita para visitar esse menu e observar as opções de
+Por ora não necessitamos modificar nenhuma configuração do menu Build Options.
+De qualquer forma, aproveite para visitar esse menu e observar as opções de
 configuração que temos disponível. A ferramenta KConfig possui uma opção de
 ajuda para descrever mais informações sobre cada item de configuração. 
  
@@ -109,11 +109,11 @@ ajuda para descrever mais informações sobre cada item de configuração.
  
 #### Target Packages
 
-Por hora não iremos habilitar nenhum outro pacote nesta configuração inicial
+Por ora não iremos habilitar nenhum outro pacote nesta configuração inicial
 
 #### Filesystem
 
-Por hora não iremos modificar a opção padrão (tar the root filesystem)
+Por ora não iremos modificar a opção padrão (tar the root filesystem)
 
 #### Bootloaders
 
@@ -133,7 +133,7 @@ Por hora não iremos modificar a opção padrão (tar the root filesystem)
 #### Finalizando a configuração e gerando o Linux Embarcado
 
 Pronto, agora saia de todos os menus da ferramenta Kconfig, não se esquecendo de
-confirmar a gravação das configurações no sistema, respondeno ```Yes``` quando
+confirmar a gravação das configurações no sistema, respondendo ```Yes``` quando
 perguntado.
 
 Você irá voltar a linha de comando, dentro da pasta do Buildroot. Para iniciar a
@@ -155,7 +155,7 @@ O BeagleBone Black é alimentado pelo cabo USB-A para mini-USB, conectado ao
 conector mini-USB identificado como P4 na parte traseira da placa.
 
 O conector serial Beaglebone é exportado nos 6 pinos macho próximos a um dos
-cabeçalhos de 48 pinos. Utilize o adaptador USB para Serial fornecido,
+cabeçalhos de 46 pinos. Utilize o adaptador USB para Serial fornecido,
 conectando o fio terra (preto) ao pino mais próximo ao conector da fonte de
 alimentação (vamos chamá-lo de pino 1) e os fios TX (verde) e RX (branco) ao
 pinos 4 (placa RX) e 5 (placa TX). Você sempre deve se certificar de conectar o
@@ -309,7 +309,7 @@ ver quais processos estão em execução e observe o que o Buildroot gerou em /b
 redefinir o ambiente U-Boot executando os seguintes comandos U-Boot:
 
 ```
-env padrão -f -a
+env default -f -a
 saveenv
 ```
 

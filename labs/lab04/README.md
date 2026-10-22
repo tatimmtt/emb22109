@@ -33,23 +33,25 @@ Agora tudo parece estar correto, mas há algumas melhorias que podemos fazer.
 
 Se você verificar o diretório `output/target/usr/bin`, encontrará um programa chamado `libfoo-example1`. Este é apenas um programa de exemplo para a `libfoo` e geralmente não é muito útil em um sistema de destino real. Portanto, gostaríamos que esse programa de exemplo não fosse instalado. Para conseguir isso, adicione um *hook* de destino *post-install* que remova o `libfoo-example1`. Reconstrua o pacote `libfoo` e verifique se o `libfoo-example1` foi removido corretamente.
 
-Agora, se você for para o diretório `output/build/libfoo-v0.1` e executar `./configure --help` para ver as opções disponíveis, deverá ver uma opção chamada `--enable-debug-output`, que habilita um recurso de depuração da `libfoo`. Adicione uma subopção em `package/libfoo/Config.in` para habilitar o recurso de depuração e o código correspondente em `libfoo.mk` para passar `--enable-debug-output`. <!-- ou `--disable-debug-output` quando apropriado. -- Isso não funciona! HUgom-->
+Agora, se você for para o diretório `output/build/libfoo-v0.1` e executar `./configure --help` para ver as opções disponíveis, deverá ver uma opção chamada `--enable-debug-output`, que habilita um recurso de depuração da `libfoo`. Adicione uma subopção em `package/libfoo/Config.in` para habilitar o recurso de depuração e o código correspondente em `libfoo.mk` para passar `--enable-debug-output` quando a subopção estiver habilitada.
+
+> Nota: normalmente passaríamos também `--disable-debug-output` quando a subopção estiver desabilitada. No caso da `libfoo`, porém, o `configure.ac` ignora o valor da opção: `--disable-debug-output` também habilita a depuração. Por isso, passe apenas `--enable-debug-output`.
 
 Habilite essa nova opção no `menuconfig` e reinicie a compilação do pacote. Verifique na saída da compilação se `--enable-debug-output` foi passado corretamente como argumento para o script `configure`.
 
 Agora, o empacotamento da `libfoo` parece estar correto, então vamos voltar para nosso aplicativo *bar*.
 
-## Finalize a embalagem do `bar`
+## Finalize o empacotamento do `bar`
 
 Então, *bar* estava falhando na configuração porque estava faltando o `libfoo`. Agora que o `libfoo` está disponível, modifique *bar* para adicionar o `libfoo` como uma dependência. Lembre-se que isso precisa ser feito em dois lugares: no arquivo `Config.in` e no arquivo `bar.mk`.
 
-Reinicie a compilação e ela deverá ser bem-sucedida! Agora você pode executar o aplicativo *bar* no seu destino e descobrir o quão absolutamente inútil ele é, exceto por permitir que você aprenda sobre a embalagem do Buildroot!
+Reinicie a compilação e ela deverá ser bem-sucedida! Agora você pode executar o aplicativo *bar* no seu destino e descobrir o quão absolutamente inútil ele é, exceto por permitir que você aprenda sobre o empacotamento no Buildroot!
 
-## Embalagem do `bar`: dependência *libconfig*
+## Empacotamento do `bar`: dependência *libconfig*
 
-Mas há mais coisas que podemos fazer para melhorar a embalagem do *bar*. Se você for para `output/build/bar-1.0` e executar `./configure --help`, verá que ele suporta uma opção `--with-libconfig`. E de fato, o arquivo `README` do *bar* também menciona o `libconfig` como uma dependência opcional.
+Mas há mais coisas que podemos fazer para melhorar o empacotamento do *bar*. Se você for para `output/build/bar-1.0` e executar `./configure --help`, verá que ele suporta uma opção `--with-libconfig`. E de fato, o arquivo `README` do *bar* também menciona o `libconfig` como uma dependência opcional.
 
-Portanto, altere o `bar.mk` para adicionar o *libconfig* como uma dependência opcional. Não é necessário adicionar uma nova opção `Config.in` para isso: apenas certifique-se de que quando o *libconfig* estiver habilitado na configuração do Buildroot, `--with-libconfig` seja passado para o script de configuração do *bar* e que o *libconfig* seja compilado antes do *bar*. Também passe `--without-libconfig` quando o *libconfig* não estiver habilitado.
+Portanto, altere o `bar.mk` para adicionar o *libconfig* como uma dependência opcional. Não é necessário adicionar uma nova opção `Config.in` para isso: apenas certifique-se de que quando o *libconfig* estiver habilitado na configuração do Buildroot, `--with-libconfig` seja passado para o script de configuração do *bar* e que o *libconfig* seja compilado antes do *bar*. Também passe `--without-libconfig` quando o *libconfig* não estiver habilitado. Como o script de configuração do *bar* procura o *libconfig* usando o `pkg-config`, acrescente também `host-pkgconf` às dependências quando o *libconfig* estiver habilitado.
 
 Habilite o `libconfig` na configuração do Buildroot e reinicie a compilação do *bar*. O que acontece?
 
@@ -72,8 +74,9 @@ Após a clonagem, vá para o diretório do *bar* e crie um novo branch chamado `
 git branch buildroot v1.0
 ```
 
-Mude para este novo branch:
-\footnote{Sim, podemos usar `git checkout -b` para criar o branch e mudar para ele em um único comando
+Mude para este novo branch[^checkout]:
+
+[^checkout]: Sim, podemos usar `git checkout -b buildroot v1.0` para criar o branch e mudar para ele em um único comando.
 
 ```
 git checkout buildroot
@@ -83,7 +86,7 @@ git checkout buildroot
 Faça a alteração `#include <libconfig.h>` em `src/main.c` e faça o commit do resultado:
 
 ```
-git commit -a -m "Fix missing <libconfig.h> include"
+git commit -a -s -m "Fix missing <libconfig.h> include"
 ```
 
 
@@ -112,7 +115,7 @@ verbose = "yes"
 
 Execute o *bar* novamente e veja a diferença que ele faz.
 
-Parabéns, você terminou de embalar o aplicativo mais inútil do mundo!
+Parabéns, você terminou de empacotar o aplicativo mais inútil do mundo!
 
 ## Preparando-se para o próximo laboratório
 

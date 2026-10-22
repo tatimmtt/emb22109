@@ -5,9 +5,9 @@ Objetivos:
    - Personalizar o sistema de arquivos raiz usando uma sobreposição do rootfs
    - Personalizar a configuração do kernel do Linux
    - Usar um script pós-compilação
-   - Personalizar o kernel com patches e
+   - Personalizar o kernel com patches
    - Adicionar mais pacotes
-   - Use arquivos defconfig e construção fora da árvore
+   - Usar arquivos defconfig e construção fora da árvore
   
 ## Explorar a saída de compilação
 
@@ -70,7 +70,7 @@ Iremos realizar a configuração da rede no computador host através do DHCP, pa
 
 Execute `make menuconfig` e habilite o pacote dhcp (ISC). Antes de selecionar o dhcp (ISC), precisamos habilitar o Buildroot para mostrar os pacotes que já são fornecidos pelo Busybox.
 
-Você pode usar a capacidade de pesquisa do menuconfig digitando `/`, digite `SHOW_OTHERS`. Ele fornecerá uma lista de resultados e cada resultado está associado a um número entre parênteses, como (1). Em seguida, basta pressionar 1 e o menuconfig pulará para a opção correta. Selecione a opção `Mostrar pacotes que também são fornecidos pelo busybox`. Agora use o recurso de pesquisa novamente para instalar o pacote `dhcp (ISC)`. Selecione também a opção `dhcp server`.
+Você pode usar a capacidade de pesquisa do menuconfig digitando `/`, digite `SHOW_OTHERS`. Ele fornecerá uma lista de resultados e cada resultado está associado a um número entre parênteses, como (1). Em seguida, basta pressionar 1 e o menuconfig pulará para a opção correta. Selecione a opção `Show packages that are also provided by busybox` (mostrar pacotes que também são fornecidos pelo BusyBox). Agora use o recurso de pesquisa novamente para instalar o pacote `dhcp (ISC)`. Selecione também a opção `dhcp server`.
 
 Agora vamos incluir a configuração do servidor DHCP em seu rootfs. Então, em `board/ifsc/beagleboneblack/rootfs-overlay`, crie um arquivo chamado `etc/dhcp/dhcpd.conf` com o seguinte conteúdo:
 
@@ -103,9 +103,11 @@ Depois de sair do menuconfig, reinicie a compilação executando `make`. Nesse c
 Extraia novamente o tarball do sistema de arquivos raiz na partição rootfs do cartão SD. Não se esqueça de substituir todo o sistema de arquivos raiz:
 
 ```
-rm -rf /media/$USER/rootfs/*
+sudo rm -rf /media/$USER/rootfs/*
 sudo tar -C /media/$USER/rootfs/ -xf output/images/rootfs.tar
 ```
+
+Nas máquinas do laboratório, utilize o comando `rootfs_update.sh clean` dentro da pasta `output/images`: a opção `clean` apaga o conteúdo da partição antes de extrair o novo sistema de arquivos raiz.
 
 Agora, inicialize o novo sistema no BeagleBone Black. Você deve ver uma mensagem:
 
@@ -141,10 +143,10 @@ A configuração do seu kernel agora foi personalizada, mas essas alterações s
 
    1. Execute Buildroot menuconfig
 
-   2. No menu Kernel, em vez de Using a defconfig, escolha Using a custom config file.
+   2. No menu Kernel, na opção `Kernel configuration`, em vez de `Using an in-tree defconfig file`, escolha `Using a custom (def)config file`.
       Isso nos permitirá usar nosso próprio arquivo de configuração de kernel personalizado, em vez de um defconfig predefinido que vem com os fontes do kernel.
 
-   3. No caminho do arquivo de configuração, digite board/ifsc/beagleboneblack/linux.config.
+   3. Na opção `Configuration file path`, digite board/ifsc/beagleboneblack/linux.config.
 
    4. Sair do menuconfig
 
@@ -154,7 +156,7 @@ Execute novamente a compilação do sistema executando `make`. Atualize o *zImag
 
 ## Use um script pós-compilação
 
-Escreva um shell script que crie um arquivo chamado `/etc/build-id` no sistema de arquivos raiz, contendo o Git commit id do fonte do Buildroot, bem como a data atual. Uma vez que este script será executado como um script pós-compilação, lembre-se que o primeiro argumento passado para o script é `$(TARGET_DIR)`.
+Escreva um shell script, salvo em `board/ifsc/beagleboneblack/post-build.sh`, que crie um arquivo chamado `/etc/build-id` no sistema de arquivos raiz, contendo o Git commit id do fonte do Buildroot, bem como a data atual. Uma vez que este script será executado como um script pós-compilação, lembre-se que o primeiro argumento passado para o script é `$(TARGET_DIR)`.
 
 ```bash
 #!/bin/sh
@@ -162,7 +164,13 @@ Escreva um shell script que crie um arquivo chamado `/etc/build-id` no sistema d
 echo "Buildroot - $(git describe) - $(date)" > ${TARGET_DIR}/etc/build-id
 ```
 
-Registre este script como um script pós-compilação em sua configuração Buildroot, execute uma compilação e verifique se /etc/build-id foi criado conforme o esperado.
+O script precisa ter permissão de execução:
+
+```
+chmod +x board/ifsc/beagleboneblack/post-build.sh
+```
+
+Registre este script como um script pós-compilação em sua configuração Buildroot (menu `System configuration`, opção `Custom scripts to run before creating filesystem images`), execute uma compilação e verifique se /etc/build-id foi criado conforme o esperado.
 
 ## Aplicar um patch ao kernel do Linux
 
@@ -184,8 +192,8 @@ cp ../labs/lab02/files/linux/*.patch \
 O primeiro patch adiciona o driver, o segundo patch ajusta a árvore de dispositivos. Sinta-se livre para olhar para eles. <!--Se você estiver interessado, pode consultar nosso curso de treinamento Embedded Linux kernel driver development, que cobre precisamente o desenvolvimento deste driver.-->
 
 Agora, precisamos dizer ao Buildroot para aplicar esses patches antes de compilar o kernel. Para fazer isso,
-execute `menuconfig`, vá para o menu de opções de compilação e ajuste os diretórios de patches globais
-opção para `board/ifsc/beagleboneblack/patches/`.
+execute `menuconfig`, vá para o menu `Build options` e ajuste a opção `global patch and hash directories`
+para `board/ifsc/beagleboneblack/patches/`.
 
 Vamos agora limpar completamente o pacote linux para que suas fontes sejam extraídas novamente e nossos patches aplicados na próxima vez que fizermos uma compilação:
 
@@ -282,17 +290,9 @@ Ative este pacote no Buildroot, reinicie a compilação, atualize novamente o si
 evtest /dev/input/event0
 ```
 
-
-Since the raw events from the Nunchuk are not very convenient to read, let’s install an application that will decode the raw input events and display them in a more human readable format: evtest.
-
-Enable this package in Buildroot, restart the build, reflash the root filesystem and reboot the system. Now you can use evtest:
-
-```
-evtest /dev/input/event0
-```
 ## Gerar um defconfig
 
-Agora que nosso sistema já está mais avançado, vamos garantir que sua configuração esteja devidamente salva e não possa ser perdida. Vá em menuconfig e no menu de opções de construção (build). Existe uma opção chamada `Localização para salvar a configuração do buildroot` que indica onde o Buildroot salvará o arquivo defconfig gerado pelo make savedefconfig. Ajuste este valor para $(TOPDIR)/configs/emb22109_defconfig.
+Agora que nosso sistema já está mais avançado, vamos garantir que sua configuração esteja devidamente salva e não possa ser perdida. Vá em menuconfig e no menu de opções de construção (build). Existe uma opção chamada `Location to save buildroot config` que indica onde o Buildroot salvará o arquivo defconfig gerado pelo make savedefconfig. Ajuste este valor para $(TOPDIR)/configs/emb22109_defconfig.
 
 Em seguida, saia do menuconfig e execute:
 
@@ -315,20 +315,20 @@ Identifique as opções relacionadas aos seguintes aspectos do sistema:
 
 Para garantir que possamos reconstruir nosso sistema completamente, começaremos uma compilação do zero. E para aprender algo novo, usaremos out of tree build.
 
-Para fazer isso, crie um diretório de compilação em qualquer lugar que desejar e mova-se para dentro deste diretório:
+Para fazer isso, crie um diretório de compilação e mova-se para dentro deste diretório. Utilizaremos a pasta `/emb22109`, que é persistente nas máquinas do laboratório (dentro do container, ela corresponde a `/var/data/aluno/emb22109`):
 
 ```
-mkdir ~/emb22109/lab02-build/
-cd ~/emb22109/lab02-build/
+mkdir /emb22109/lab02-build/
+cd /emb22109/lab02-build/
 ```
 
 Agora, vamos carregar o emb22109_defconfig:
 
 ```
-make -C ~/emb22109/buildroot/ O=$(pwd) emb22109_defconfig
+make -C /emb22109/buildroot/ O=$(pwd) emb22109_defconfig
 ```
 
-Vamos explicar um pouco o que acontece aqui. Usando -C ~/emb22109/buildroot/, na verdade, informamos ao make que o Makefile a ser analisado não está no diretório atual, mas no diretório passado como argumento -C. Ao passar O=, dizemos ao Buildroot onde toda a saída deve ir: por padrão, ele vai em output/ dentro das fontes do Buildroot, mas aqui substituímos isso pelo diretório atual ($(pwd)).
+Vamos explicar um pouco o que acontece aqui. Usando -C /emb22109/buildroot/, na verdade, informamos ao make que o Makefile a ser analisado não está no diretório atual, mas no diretório passado como argumento -C. Ao passar O=, dizemos ao Buildroot onde toda a saída deve ir: por padrão, ele vai em output/ dentro das fontes do Buildroot, mas aqui substituímos isso pelo diretório atual ($(pwd)).
 
 Este comando terá dois efeitos principais:
 

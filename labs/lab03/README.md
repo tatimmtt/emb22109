@@ -132,8 +132,10 @@ Agora, para experimentar com o Buildroot, faça o seguinte teste: desative o pac
 Se você quiser verificar se seu pacote atende às regras de estilo de codificação do Buildroot, execute:
 
 ```
-make check-package
+./utils/check-package package/ninvaders/*
 ```
+
+Note que o alvo `make check-package` verifica apenas os arquivos já registrados (*commit*) no repositório Git do Buildroot; por isso, um pacote novo, ainda sem *commit*, ficaria de fora da verificação.
 
 Embora um resultado bem-sucedido não signifique que seu pacote seja perfeito, pelo menos verifica alguns requisitos básicos.
 
